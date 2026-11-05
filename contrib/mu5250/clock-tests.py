@@ -17,6 +17,7 @@ with tempfile.TemporaryDirectory(prefix='guard-',dir=ROOT) as directory:
     (folder/'log').write_text('NTP service start\n')
     (folder/'bin/readlink').write_text('#!/bin/sh\nif [ "${TEST_OWNER:-1}" = 1 ]; then echo "$MU_OC_CORE_EXE"; else echo /wrong; fi\n',newline='\n')
     (folder/'bin/curl').write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_ROOT/curl.args"\ncat > "$TEST_ROOT/curl.header"\n[ "${TEST_CURL_FAIL:-0}" = 0 ]\n',newline='\n')
+    for name in ['readlink','curl']:(folder/'bin'/name).chmod(0o700)
     env=os.environ.copy();env.update({'TEST_ROOT':unix(folder),'TEST_BIN':unix(folder/'bin'),
         'TEST_SCRIPT':unix(WORK/'core-clock-guard.sh'),'MU_OC_BASE':unix(folder/'app'),'MU_OC_PROC_ROOT':unix(folder/'proc'),
         'MU_OC_LOG':unix(folder/'log'),'MU_OC_CORE_EXE':'/app/core','MU_OC_SECRET_FILE':unix(folder/'secret'),'MU_OC_CONTROLLER':'27971'})

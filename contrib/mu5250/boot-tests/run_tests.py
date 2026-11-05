@@ -27,6 +27,7 @@ def run(name,expected=0,contains='',script='core-ready.sh',**settings):
         if script=='start-enabled-core.sh':
             service=folder/'service.sh'
             service.write_text('#!/bin/bash\nn=0\n[ ! -r "$TEST_ROOT/count" ] || read -r n < "$TEST_ROOT/count"\nn=$((n+1)); echo "$n" > "$TEST_ROOT/count"\n[ "$n" -ge "${TEST_SUCCESS_AT:-99}" ]\n',encoding='utf-8',newline='\n')
+            service.chmod(0o700)
             env['MU_OC_SERVICE']=unix(service)
         process=subprocess.run([str(BASH),'--noprofile','--norc','--posix',unix(ROOT/'launcher.sh')],env=env,capture_output=True,text=True,timeout=15)
         output=process.stdout+process.stderr
