@@ -1,0 +1,17 @@
+name: MU5250 adapter regression tests
+on:
+  push:
+    branches: [codex/mu5250-integration]
+    paths: ['contrib/mu5250/**', '.github/workflows/mu5250-adapter-tests.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 contrib/mu5250/boot-tests/run_tests.py
+      - run: python3 contrib/mu5250/boot-tests/test_ubus_readiness.py
+      - run: python3 contrib/mu5250/clock-tests.py
+      - run: python3 contrib/mu5250/network-tests/run_tests.py

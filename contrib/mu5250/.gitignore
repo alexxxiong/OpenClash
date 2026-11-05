@@ -1,0 +1,11 @@
+__pycache__/
+clock-tests/
+boot-tests/*-test-*/
+boot-tests/results.json
+boot-tests/ubus-results.json
+network-tests/bin/
+network-tests/work/
+network-tests/results.json
+network-tests/reviewed-network-rules.sh
+dist/
+*.tar
