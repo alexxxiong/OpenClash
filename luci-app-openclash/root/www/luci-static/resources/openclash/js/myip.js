@@ -361,8 +361,10 @@
 
     let random = parseInt(Math.random() * 100000000);
     let IP = {
-        get: (url, type) =>
-            fetch(url, { method: 'GET' }).then((resp) => {
+        get: (url, type) => {
+            var controller = new AbortController();
+            var timer = setTimeout(function() { controller.abort(); }, 12000);
+            return fetch(url, { method: 'GET', signal: controller.signal }).then((resp) => {
                 if (type === 'text')
                     return Promise.all([resp.ok, resp.status, resp.text(), resp.headers]);
                 else {
@@ -378,11 +380,10 @@
                     }
                     return json;
                 } else {
-                    throw new Error(JSON.stringify(json.error));
+                    throw new Error('HTTP ' + status);
                 }
-            }).catch(error => {
-                throw error;
-            }),
+            }).finally(function() { clearTimeout(timer); });
+        },
         parseIPIpip: (ip, elID) => {
             const v4 = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)){3}';
             const v4Exact = new RegExp(`^${v4}$`);
@@ -442,17 +443,23 @@
             document.head.appendChild(script);
         },
         getIpipIP: () => {
-            IP.get(`https://myip.ipip.net?z=${random}`, 'text')
+            // The proxy exit's IPIP response may omit CORS headers. Use the fixed
+            // same-origin backend query through the existing proxy instead.
+            return IP.get('/cgi-bin/luci/admin/services/openclash/myip_check?service=ipip&proxy=1', 'text')
             .then(resp => {
-                const ipMatch = resp.data.match(/当前 IP：([0-9A-Fa-f:.]+)/);
-                const geoMatch = resp.data.match(/来自于：(.+)/);
-
-                if (ipMatch && geoMatch) {
-                    $$.getElementById('ip-ipip').innerHTML = localStorage.getItem('privacy_my_ip') == 'true' ? '***.***.***.***' : ipMatch[1];
-                    $$.getElementById('ip-ipip-geo').innerHTML = geoMatch[1].trim();
-                    addTitleOnOverflow();
-                }
-            })
+                var result = null;
+                resp.data.split('\n').forEach(function(line) {
+                    try {
+                        var row = JSON.parse(line.trim());
+                        if (row.service === 'ipip') result = row;
+                    } catch (e) {}
+                });
+                if (!result || (!result.ip && !result.error)) throw new Error('Invalid IP response');
+                update_ip_single(result);
+                addTitleOnOverflow();
+            }).catch(function(error) {
+                show_ip_error('ipip', error.name === 'AbortError' ? 'timeout' : 'query_failed');
+            });
         },
         getIpifyIP: () => {
             IP.get(`https://api.ipify.org/?format=json&z=${random}`, 'json')
@@ -1711,6 +1718,22 @@
         xhr.timeout = 35000;
         var lastIndex = 0;
         var pendingBuf = '';
+        var received = {};
+
+        function handle_line(line) {
+            try {
+                var obj = JSON.parse(line.trim());
+                if (obj.service) { received[obj.service] = true; update_ip_single(obj); }
+            } catch(e) {}
+        }
+
+        function finish_missing(reason) {
+            if (pendingBuf.trim()) { handle_line(pendingBuf); pendingBuf = ''; }
+            ['ipip', 'ipsb', 'pcol', 'ipify'].forEach(function(key) {
+                if (!received[key]) show_ip_error(key, reason);
+            });
+            addTitleOnOverflow();
+        }
 
         xhr.onprogress = function() {
             var newText = xhr.responseText.substring(lastIndex);
@@ -1721,35 +1744,35 @@
             for (var i = 0; i < lines.length; i++) {
                 var line = lines[i].trim();
                 if (!line) continue;
-                try {
-                    var obj = JSON.parse(line);
-                    if (obj.complete) {
-                        addTitleOnOverflow();
-                        return;
-                    }
-                    update_ip_single(obj);
-                } catch(e) {}
+                handle_line(line);
             }
         };
 
         xhr.onload = function() {
-            if (xhr.status !== 200) {
-                if (!has_ip_cache()) show_querying_state();
-            }
-            addTitleOnOverflow();
+            finish_missing('query_failed');
         };
 
         xhr.ontimeout = function() {
-            if (!has_ip_cache()) show_querying_state();
+            finish_missing('timeout');
         };
 
         xhr.onerror = function() {
-            if (!has_ip_cache()) show_querying_state();
+            finish_missing('query_failed');
         };
 
         xhr.onloadend = function() { if (ipCheckXHR === xhr) ipCheckXHR = null; };
         xhr.send();
         ipCheckXHR = xhr;
+    }
+
+    function show_ip_error(key, reason) {
+        var id = {ipip: 'ip-ipip', ipsb: 'ip-ipsb', pcol: 'ip-pcol', ipify: 'ip-ipify'}[key];
+        if (!id) return;
+        var privateMode = localStorage.getItem('privacy_my_ip') === 'true';
+        var message = reason === 'timeout' ? '<%:Timeout%>' : '<%:Test failed%>';
+        $$.getElementById(id).textContent = privateMode ? '***.***.***.***' : message;
+        $$.getElementById(id + '-geo').textContent = '';
+        addTitleOnOverflow();
     }
 
     function update_ip_single(obj) {
@@ -1768,16 +1791,12 @@
         if (!el) return;
 
         if (obj.error) {
-            var curIp = $$.getElementById(el.id).textContent;
-            if (!curIp || curIp === '<%:Querying...%>' || curIp === '***.***.***.***') {
-                $$.getElementById(el.id).innerHTML = (obj.error === 'timeout') ? '<%:Timeout%>' : querying_html();
-            }
-            $$.getElementById(el.geo).innerHTML = '';
+            show_ip_error(key, obj.error);
             return;
         }
 
         if (obj.ip) {
-            $$.getElementById(el.id).innerHTML = isPrivacy ? '***.***.***.***' : obj.ip;
+            $$.getElementById(el.id).textContent = isPrivacy ? '***.***.***.***' : obj.ip;
         }
         if (obj.geo) {
             var geoText = obj.geo;
@@ -1792,7 +1811,7 @@
                     geoText = new TextDecoder('gbk').decode(rawBytes);
                 } catch(e) { geoText = ''; }
             }
-            $$.getElementById(el.geo).innerHTML = geoText;
+            $$.getElementById(el.geo).textContent = geoText;
         }
     }
 

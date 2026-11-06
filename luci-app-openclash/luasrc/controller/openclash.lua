@@ -2472,7 +2472,11 @@ end
 function action_myip_check()
 	local result = {}
 	local random = math.random(100000000)
+	local requested = HTTP.formvalue("service")
+	-- Browser fallback is deliberately limited to this fixed IPIP service.
+	local proxy_ipip = requested == "ipip" and HTTP.formvalue("proxy") == "1"
 	HTTP.prepare_content("text/plain; charset=utf-8")
+	HTTP.header("Cache-Control", "no-store")
 
 	local services = {
 		{
@@ -2509,7 +2513,7 @@ function action_myip_check()
 		},
 		{
 			name = "ipip",
-			url = string.format("http://myip.ipip.net?z=%d", random),
+			url = string.format("https://myip.ipip.net/?z=%d", random),
 			parser = function(data)
 				if data and data ~= "" then
 					local ip = string.match(data, "当前 IP：([%x:%.]+)")
@@ -2570,15 +2574,37 @@ function action_myip_check()
 		}
 	}
 
+	if requested and requested ~= "" then
+		local selected = {}
+		for _, service in ipairs(services) do
+			if service.name == requested then selected[#selected + 1] = service end
+		end
+		if #selected == 0 then
+			HTTP.status(400, "Bad Request")
+			HTTP.write_json({ error = "Unknown IP service" })
+			return
+		end
+		services = selected
+	end
+
 	local function create_concurrent_query(service)
 		local fdi, fdo = nixio.pipe()
 		if not fdi or not fdo then
 			return nil
 		end
 
+		local proxy_args = ""
+		if proxy_ipip then
+			local port = tonumber(uci:get("openclash", "config", "mixed_port")) or 7893
+			if port ~= math.floor(port) or port < 1 or port > 65535 then
+				fdi:close(); fdo:close()
+				return nil
+			end
+			proxy_args = string.format('--proxy http://127.0.0.1:%d --noproxy "" ', port)
+		end
 		local cmd = string.format(
-			'curl -SsL -m 10 -A "%s" "%s" 2>/dev/null',
-			fs.user_agent, service.url
+			'curl -fsSL --connect-timeout 4 -m 10 %s-A %s %s 2>/dev/null',
+			proxy_args, UTIL.shellquote(fs.user_agent), UTIL.shellquote(service.url)
 		)
 
 		local pid = nixio.fork()
@@ -2646,6 +2672,24 @@ function action_myip_check()
 	local iteration = 0
 	local delay = 50000000
 	local completed = {}
+	local function complete_query(name, info)
+		-- Drain remaining bytes after waitpid before closing the pipe.
+		for _ = 1, 32 do
+			local ok, buffer = pcall(info.query.reader)
+			if not ok or not buffer or buffer == "" then break end
+			info.data = info.data .. buffer
+		end
+		pcall(info.query.close)
+		completed[name] = true
+		local parsed_result = info.parser(info.data)
+		if parsed_result then
+			result[name] = parsed_result
+			write_padded(json.stringify({ service = name, ip = parsed_result.ip, geo = parsed_result.geo, raw = parsed_result.raw }))
+		else
+			result[name] = { error = "query_failed" }
+			write_padded(json.stringify({ service = name, error = "query_failed" }))
+		end
+	end
 
 	while iteration < max_iterations do
 		iteration = iteration + 1
@@ -2661,20 +2705,7 @@ function action_myip_check()
 				end
 
 				if ok_w and wpid then
-					pcall(info.query.close)
-					completed[name] = true
-
-					local parsed_result = info.parser(info.data)
-					if parsed_result then
-						result[name] = parsed_result
-						local ok_j, jdata = pcall(json.stringify, {
-							service = name,
-							ip = parsed_result.ip,
-							geo = parsed_result.geo,
-							raw = parsed_result.raw
-						})
-						if ok_j and jdata then write_padded(jdata) end
-					end
+					complete_query(name, info)
 
 					while #pending_services > 0 do
 						local next_s = table.remove(pending_services, 1)
@@ -2691,20 +2722,7 @@ function action_myip_check()
 				else
 					local ok_k, still_running = pcall(nixio.kill, info.query.pid, 0)
 					if not (ok_k and still_running) then
-						pcall(info.query.close)
-						completed[name] = true
-
-						local parsed_result = info.parser(info.data)
-						if parsed_result then
-							result[name] = parsed_result
-							local ok_j, jdata = pcall(json.stringify, {
-								service = name,
-								ip = parsed_result.ip,
-								geo = parsed_result.geo,
-								raw = parsed_result.raw
-							})
-							if ok_j and jdata then write_padded(jdata) end
-						end
+						complete_query(name, info)
 
 						while #pending_services > 0 do
 							local next_s = table.remove(pending_services, 1)

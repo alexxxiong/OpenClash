@@ -18,6 +18,11 @@ local type = arg[1]
 local all_test = arg[2] == "all"
 local check_only = arg[2] == "check"
 local result_output = arg[2] == "result"
+-- Private MU5250 installs intercept LAN clients, not the router's OUTPUT traffic.
+-- Scope the proxy to read-only checks; keep controller/LAN requests in no_proxy.
+if check_only and require("nixio.fs").access("/usr/share/openclash/mu5250-diagnostic-proxy.lua") then
+	SYS = dofile("/usr/share/openclash/mu5250-diagnostic-proxy.lua").wrap_sys(SYS)
+end
 math.randomseed(os.time())
 local status, ip, port, passwd, group_match_name
 local tested_set = {}

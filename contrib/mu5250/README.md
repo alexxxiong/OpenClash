@@ -18,6 +18,7 @@
 | `finalize-config.rb`, `core-clock-guard.sh` | 应用端口、TUN、内部 NTP 与同步后清 DNS 缓存保护 |
 | `network-rules.sh` | 只拥有 `MU_OC_*` 链、路由表 7250、优先级 17250；覆盖 `br-lan` 的 Wi-Fi / USB 客户端 |
 | `managed-plugin-update.sh` | 独立适配安装的整包插件升级保护 |
+| `diagnostic-proxy.lua` | 私有 `/usr/share/openclash/mu5250-diagnostic-proxy.lua`；仅为解锁 `check` 子进程设置现有 mixed-port 代理，本地控制器请求绕过代理 |
 
 常用管理入口：设备 LAN 地址的 `:8081/cgi-bin/luci/admin/services/openclash`。当前默认 LAN 为 `192.168.3.1`，原 OpenUI `:8080` 和密钥 SSH `:2222` 保留。路径、端口及接口默认值针对当前已验证安装；更换 LAN 或固件时应先复核。
 
@@ -56,3 +57,19 @@ git push origin codex/mu5250-integration
 5. 出现异常时恢复已保存的核心与配置。不能对原厂环境运行仓库主体的安装钩子或直接用网页整包升级替换适配。
 
 原固件保护要求：不改分区、USB composition、原厂 init.d/procd、firewall include 或系统服务 UCI；不停止启动屏障中的 ZTE 守护进程。改动 `/etc/rc.local` 后必须 `sh -n`，FOTA 更新可能清除其内容，应保留恢复资料。
+
+## 解锁检测与 IP 查询
+
+独立应用只接管 LAN 的 PREROUTING 流量，因此 LuCI 解锁检测需要明确使用当前 mixed-port 代理。`openclash_streaming_unlock.lua` 的 `check` 模式在适配模块存在时，仅包装本次脚本的命令环境；不设置服务或系统全局代理，不修改节点、分流规则和核心配置。控制器、回环与设备 LAN 地址列入 `no_proxy`。
+
+客户端模式的 IPIP 卡片经 LuCI 同源接口查询当前代理出口，固定目标为 HTTPS `myip.ipip.net`，避免其海外响应缺少 CORS 许可时卡住。路由器模式仍使用路由器本机原有出口。接口不接受自定义目标 URL；无效、空响应与超时均有结束状态，前端显示检测失败或超时。`myip.htm` 使用独立缓存版本后缀，让已有浏览器加载修复后的脚本。
+
+维护这项修复时需一并更新控制器、`myip.js`、`myip.htm`、解锁 Lua 和适配模块。只需原子替换私有 overlay 中对应文件，无需重启核心、独立 Web 服务或整机。
+
+```sh
+node contrib/mu5250/test-diagnostic-ui.mjs
+# 设备已有 LuCI/Lua 环境中的模拟测试；两个参数为候选文件路径，不访问外网或改配置。
+lua contrib/mu5250/test-diagnostic-proxy.lua contrib/mu5250/diagnostic-proxy.lua luci-app-openclash/luasrc/controller/openclash.lua
+```
+
+9 项前端回归与 11 项 Lua 代理/控制器回归覆盖同源查询、响应尾片段、失败、超时、隐私遮罩以及本地绕过。地区探测结果表示当前检查接口的判断；Cloudflare 验证与服务账号功能仍需通过真实浏览器区分。
