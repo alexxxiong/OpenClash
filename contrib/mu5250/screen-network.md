@@ -13,6 +13,7 @@
 | `screen-control.sh` | 序列化 on/off；有界、只读的真实状态检查 |
 | `screen-status-poll.sh` | 独立进程轮询，原子发布状态缓存 |
 | `screen-network-watch.sh` | 原厂挂载空间中的启动接入；校验文件、等待 UI、每个 PID 只尝试一次 |
+| `screen-ready.c` | 只读检查显示缓冲、LVGL 定时器及界面主循环心跳；替代固定延迟 |
 | `screen-loader/` | ARM64 musl 加载工具、隔离进程夹具、便携构建及验证工具源码 |
 | `test-screen-control.py`, `test-screen-child.c` | 离线状态/串行控制回归和真实 Linux 子进程回收回归 |
 
@@ -36,9 +37,20 @@ GPR、FP/NEON、TLS、系统调用号和信号屏蔽字再分离。共享库与�
 ## 重启与关闭状态
 
 现有 `/etc/rc.local` 后台调用 `start-openclash.sh`，该入口启动独立 LuCI
-命名空间及屏幕 watcher。watcher 等原厂 UI 进程出现并额外等待约 30 秒后
-加载控件；没有打开“网络”页时，控件定时器会等待页面对象出现。
+命名空间及屏幕 watcher。watcher 等原厂 UI 就绪后加载控件；没有打开
+“网络”页时，控件定时器会等待页面对象出现。
 启动 LuCI / 屏幕控件与启动代理核心相互独立。
+
+已移除原来的固定 30 秒延迟。未接入的 UI 每秒运行一次只读探测：确认
+原厂进程身份和固定版本指令、320×480 RGB565 DRM 显示映射、LVGL 定时器
+启用、32 字节节点的有效定时器链表，再观察界面定时器主循环的计时值实际
+推进。单次探测最多观察 1.2 秒；未就绪退出 75，watcher 继续等，不消耗
+唯一的加载尝试。真正调用加载器前再确认 PID；加载失败仍不对同一 PID 重试。
+
+探测器只用 O_RDONLY 读取 proc 文件和进程内存，不 ptrace、不暂停线程、
+不写进程内存、不调用 UI。它与加载器、控件库分别校验 SHA256；探测器
+校验值单独存于 `/data/openclash/lib/screen-ready.sha256`。当前已加载的
+控件直接由新 watcher 接管，不卸载、不重新注入。
 
 关闭开关调用服务 `disable`（`uci set ...enable=0; uci commit openclash`），
 然后 `stop`。开启则保存 1，再启动。`private-init.sh` 仅在 enable=1 时
@@ -46,7 +58,10 @@ GPR、FP/NEON、TLS、系统调用号和信号屏蔽字再分离。共享库与�
 
 - 开启后重启：LuCI、屏幕控件和 OpenClash 核心会按启动流程启动。
 - 关闭后重启：LuCI 和屏幕控件会启动，核心保持关闭；可以在屏幕重新开启。
-- 当前固件下已核对整个链及落盘设置；**本轮没有整机重启验收**。
+- 用户自行重启后，已实测开启状态下核心及屏幕入口自动恢复。关闭状态
+  重启只核对了落盘和启动 guard，尚未实测。
+- 就绪检测优化没有再次重启设备；新启动顺序经模拟回归、实机只读探测和
+  watcher 接管验证，完整冷启动提速尚未实测。
 
 固件升级改变 UI 校验和时 watcher 会跳过接入；需要针对新 UI 再验证。
 
@@ -88,6 +103,10 @@ clang -std=c11 -O2 -Wall -Wextra -Werror contrib/mu5250/test-screen-child.c -o /
 /tmp/test-screen-child
 python3 contrib/mu5250/screen-loader/build.py --zig /path/to/zig
 python3 contrib/mu5250/screen-loader/verify_build.py
+# Linux 上执行只读就绪探测夹具与 watcher 调度回归，不连接设备。
+cc -std=c11 -O2 -Wall -Wextra -Werror contrib/mu5250/screen-ready.c -o /tmp/oc-screen-ready
+MU_OC_READY_TEST_BINARY=/tmp/oc-screen-ready python3 contrib/mu5250/test-screen-ready.py
+python3 contrib/mu5250/test-screen-watch.py
 ```
 
 子进程测试仅在 Linux 原生运行；Windows 只交叉编译 ARM64 版本，不能直接

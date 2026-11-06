@@ -17,6 +17,7 @@ COMMON = [
     "-Werror", "-Wformat=2", "-fstack-protector-strong", "-D_FORTIFY_SOURCE=2",
 ]
 BUILDS = (
+    ("oc-screen-ready", ("-static",), ("../screen-ready.c",)),
     ("ptrace-load", ("-static",), ("ptrace_load.c", "elf_image.c")),
     ("dummy-target", ("-dynamic", "-fPIE", "-pie"), ("dummy_target.c", "dummy_loop.S")),
     ("libdummy-inject.so", ("-shared", "-fPIC", "-Wl,-z,now", "-Wl,-z,relro"),
@@ -65,7 +66,7 @@ def main():
                 "inputs": inputs, "outputs": outputs}
     manifest_path = out / "build-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    print(f"Built four artifacts; no target code executed. Manifest: {manifest_path}")
+    print(f"Built {len(outputs)} artifacts; no target code executed. Manifest: {manifest_path}")
 
 
 if __name__ == "__main__":

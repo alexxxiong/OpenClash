@@ -4,7 +4,8 @@ This source package preserves the reviewed loader and dummy fixtures from
 `stock-screen-analysis-20261107/injector`. It includes no binaries, generated
 `out/` directory or historical `REVIEW-READY.md`. The C, assembly, headers and
 `test_dummy.py` are copied byte-for-byte; the build and artifact-verification
-scripts support this packaged location and the sibling `../screen-network.c`.
+scripts support this packaged location, the sibling `../screen-network.c` and
+the separate read-only `../screen-ready.c` probe.
 
 ## Recorded runtime evidence
 
@@ -49,7 +50,8 @@ change binary hashes; do not assign the historical hash to a fresh build.
 | `dummy_target.c`, `dummy_loop.S` | Dynamic musl target with direct nanosleep, shared heartbeat and GPR/SIMD canaries. |
 | `dummy_library.c` | Constructor/entry/uninstall markers and an optional deliberately hanging constructor. |
 | `build.py` | Portable Python 3.8+ cross-build of loader, dummy target/library and sibling UI payload. |
-| `verify_build.py` | Host-only ELF and manifest/hash checks for all four outputs. |
+| `verify_build.py` | Host-only ELF and manifest/hash checks for all five outputs. |
+| `../screen-ready.c` | Read-only display/timer/heartbeat readiness probe; compiled as static `oc-screen-ready`. |
 | `test_dummy.py` | Opt-in native AArch64 Linux harness; cooperative dummy cleanup. |
 
 The UI payload source is owned by the parent at `../screen-network.c`; it is
@@ -84,17 +86,18 @@ The default output is `../dist/screen-loader/`, covered by the existing MU5250
 `dist/` ignore rule, keeping generated artifacts outside this source package.
 An explicit relative `--out` resolves against the caller's current directory.
 
-All outputs target `aarch64-linux-musl` with `-O2 -g -Wall -Wextra -Werror
+All five outputs target `aarch64-linux-musl` with `-O2 -g -Wall -Wextra -Werror
 -Wformat=2`, stack protection and fortification:
 
 - `ptrace-load`: static executable, no ELF interpreter or `DT_NEEDED`.
 - `dummy-target`: dynamic PIE, interpreter `/lib/ld-musl-aarch64.so.1`.
 - `libdummy-inject.so`: shared dummy fixture, immediate binding and RELRO.
 - `screen-network.so`: sibling screen payload, shared PIC, immediate binding and RELRO.
+- `oc-screen-ready`: static executable; reads target proc files without attachment or target execution.
 
 `build-manifest.json` records compiler version, input and output hashes/sizes,
 and `runtime_tests_executed: false`. A failed rebuild invalidates prior manifests
-and verification reports. `verify_build.py` independently reads all four ELF
+and verification reports. `verify_build.py` independently reads all five ELF
 headers and dynamic tags, checks output hashes/sizes against the manifest and
 writes `artifact-verification.json`. Run it without Python optimization flags.
 Neither script executes any target artifact or validates ptrace/GUI behavior.

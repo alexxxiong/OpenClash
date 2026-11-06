@@ -38,10 +38,11 @@ def main():
     out = args.out.expanduser().resolve()
     report_path = out / "artifact-verification.json"
     report_path.unlink(missing_ok=True)
-    names = ("ptrace-load", "dummy-target", "libdummy-inject.so", "screen-network.so")
+    names = ("ptrace-load", "dummy-target", "libdummy-inject.so", "screen-network.so", "oc-screen-ready")
     results = [inspect(out / name) for name in names]
-    helper, target, library, payload = results
+    helper, target, library, payload, readiness = results
     assert helper["elf_type"] == 2 and helper["interpreter"] is None and helper["needed_count"] == 0
+    assert readiness["elf_type"] == 2 and readiness["interpreter"] is None and readiness["needed_count"] == 0
     assert target["elf_type"] == 3 and target["interpreter"] == "/lib/ld-musl-aarch64.so.1"
     for shared in (library, payload):
         assert shared["elf_type"] == 3 and shared["interpreter"] is None and shared["dynamic_tags"] > 0

@@ -21,8 +21,13 @@ case "$suffix" in ''|*[!0-9a-f]*) exit 64 ;; esac
 tool=$base/bin/oc-screen-load
 [ "$(sha256sum "$tool" | cut -d' ' -f1)" = "$tool_hash" ] || exit 65
 [ "$(sha256sum "$library" | cut -d' ' -f1)" = "$library_hash" ] || exit 65
+ready_tool=$base/bin/oc-screen-ready
+read -r ready_hash < "$base/lib/screen-ready.sha256"
+case "$ready_hash" in ''|*[!0-9a-f]*) exit 64 ;; esac
+[ "${#ready_hash}" = 64 ] || exit 64
+[ "$(sha256sum "$ready_tool" | cut -d' ' -f1)" = "$ready_hash" ] || exit 65
 # This unit has CONFIG_PID_NS disabled. Never infer this from a missing proc file.
-zcat /proc/config.gz | grep -qx '# CONFIG_PID_NS is not set' || exit 69
+zcat /proc/config.gz | grep -x '# CONFIG_PID_NS is not set' >/dev/null || exit 69
 owned_poller() {
     p=$(cat "$base/run/screen-status-poll.pid" 2>/dev/null) || return 1
     case "$p" in ''|0*|*[!0-9]*) return 1 ;; esac
@@ -31,35 +36,57 @@ owned_poller() {
         awk 'NR==1 {a=($0=="/bin/sh")} NR==2 {b=($0=="/data/openclash/bin/screen-status-poll.sh")} END {exit !(NR==2&&a&&b)}'
 }
 attempted=
+checked=
+waiting=
 while :; do
     if ! owned_poller; then
         (exec 9>&-; exec /bin/sh "$base/bin/screen-status-poll.sh") >"$base/run/screen-status-poll.log" 2>&1 </dev/null &
     fi
     pid=$(pidof zte_topsw_devui 2>/dev/null) || pid=
-    case "$pid" in ''|0*|*[!0-9]*) sleep 5 9>&-; continue ;; esac
-    # Remember before attachment; a failure is not repeatedly retried on this PID.
+    case "$pid" in ''|0*|*[!0-9]*) sleep 1 9>&-; continue ;; esac
     if [ "$attempted" != "$pid" ]; then
-        attempted=$pid
-        if [ "$(sha256sum /usr/bin/zte_topsw_devui | cut -d' ' -f1)" != "$ui_hash" ]; then
-            echo 'Unsupported stock UI checksum; screen extension skipped'
-            sleep 5 9>&-; continue
+        if [ "$checked" != "$pid" ]; then
+            checked=$pid
+            if [ "$(sha256sum /usr/bin/zte_topsw_devui | cut -d' ' -f1)" != "$ui_hash" ]; then
+                attempted=$pid
+                echo 'Unsupported stock UI checksum; screen extension skipped'
+                sleep 5 9>&-; continue
+            fi
         fi
-        # Allow initial UI/LVGL startup to settle without blocking boot.
-        sleep 30 9>&-
-        [ "$(pidof zte_topsw_devui 2>/dev/null)" = "$pid" ] || continue
         # A restored watcher adopts an already loaded copy without reattaching.
         if grep -Fq "$library" "/proc/$pid/maps"; then
+            attempted=$pid
             if [ "$(cat "$base/run/screen-network.active" 2>/dev/null)" = "$pid $library" ]; then
                 echo "Adopted existing screen extension for UI PID $pid"
             else
                 echo "Library already mapped without confirmed activation for UI PID $pid; skipped"
             fi
         else
+            # Only passive proc reads while waiting: initialized LVGL, a display
+            # buffer, valid timers and an advancing GUI-loop heartbeat.
+            if [ "$waiting" != "$pid" ]; then
+                waiting=$pid
+                echo "Waiting for UI PID $pid readiness"
+            fi
+            if "$ready_tool" --pid "$pid" >"$base/run/screen-ready.$pid.json" 9>&-; then
+                [ "$(pidof zte_topsw_devui 2>/dev/null)" = "$pid" ] || continue
+                echo "UI PID $pid is ready; loading screen extension"
+            else
+                code=$?
+                if [ "$code" != 75 ]; then
+                    attempted=$pid
+                    echo "UI readiness refused for PID $pid (exit $code); extension skipped"
+                fi
+                sleep 1 9>&-; continue
+            fi
+            # Remember before attachment; loader failures are never retried on
+            # this PID. Readiness waits do not consume the single load attempt.
+            attempted=$pid
             result=$base/run/screen-network-load.$pid.log
             if "$tool" --confirm-no-pidns --expect-exe /usr/bin/zte_topsw_devui \
                 --expect-sha256 "$ui_hash" --pid "$pid" --so "$library" \
                 --expect-so-sha256 "$library_hash" --timeout-ms 3000 --safe-wait-ms 5000 \
-                --entry mu_screen_install --arg0 0 --ack-loader-risk >"$result" 2>&1 &&
+                --entry mu_screen_install --arg0 0 --ack-loader-risk >"$result" 2>&1 9>&- &&
                 grep -q 'mu_screen_install returned 0x0;' "$result"; then
                 printf '%s %s\n' "$pid" "$library" > "$base/run/screen-network.active"
                 echo "Installed screen extension for UI PID $pid"
