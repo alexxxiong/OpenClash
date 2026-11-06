@@ -38,6 +38,11 @@ owned_poller() {
 attempted=
 checked=
 waiting=
+note() {
+    t=unknown
+    if [ -r /proc/uptime ]; then read -r t rest </proc/uptime || t=unknown; fi
+    printf '[%s] %s\n' "$t" "$*"
+}
 while :; do
     if ! owned_poller; then
         (exec 9>&-; exec /bin/sh "$base/bin/screen-status-poll.sh") >"$base/run/screen-status-poll.log" 2>&1 </dev/null &
@@ -49,7 +54,7 @@ while :; do
             checked=$pid
             if [ "$(sha256sum /usr/bin/zte_topsw_devui | cut -d' ' -f1)" != "$ui_hash" ]; then
                 attempted=$pid
-                echo 'Unsupported stock UI checksum; screen extension skipped'
+                note 'Unsupported stock UI checksum; screen extension skipped'
                 sleep 5 9>&-; continue
             fi
         fi
@@ -57,25 +62,25 @@ while :; do
         if grep -Fq "$library" "/proc/$pid/maps"; then
             attempted=$pid
             if [ "$(cat "$base/run/screen-network.active" 2>/dev/null)" = "$pid $library" ]; then
-                echo "Adopted existing screen extension for UI PID $pid"
+                note "Adopted existing screen extension for UI PID $pid"
             else
-                echo "Library already mapped without confirmed activation for UI PID $pid; skipped"
+                note "Library already mapped without confirmed activation for UI PID $pid; skipped"
             fi
         else
             # Only passive proc reads while waiting: initialized LVGL, a display
             # buffer, valid timers and an advancing GUI-loop heartbeat.
             if [ "$waiting" != "$pid" ]; then
                 waiting=$pid
-                echo "Waiting for UI PID $pid readiness"
+                note "Waiting for UI PID $pid readiness"
             fi
             if "$ready_tool" --pid "$pid" >"$base/run/screen-ready.$pid.json" 9>&-; then
                 [ "$(pidof zte_topsw_devui 2>/dev/null)" = "$pid" ] || continue
-                echo "UI PID $pid is ready; loading screen extension"
+                note "UI PID $pid is ready; loading screen extension"
             else
                 code=$?
                 if [ "$code" != 75 ]; then
                     attempted=$pid
-                    echo "UI readiness refused for PID $pid (exit $code); extension skipped"
+                    note "UI readiness refused for PID $pid (exit $code); extension skipped"
                 fi
                 sleep 1 9>&-; continue
             fi
@@ -89,9 +94,9 @@ while :; do
                 --entry mu_screen_install --arg0 0 --ack-loader-risk >"$result" 2>&1 9>&- &&
                 grep -q 'mu_screen_install returned 0x0;' "$result"; then
                 printf '%s %s\n' "$pid" "$library" > "$base/run/screen-network.active"
-                echo "Installed screen extension for UI PID $pid"
+                note "Installed screen extension for UI PID $pid"
             else
-                echo "Screen extension attempt failed for UI PID $pid; no automatic retry"
+                note "Screen extension attempt failed for UI PID $pid; no automatic retry"
             fi
         fi
     fi

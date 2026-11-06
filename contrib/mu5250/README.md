@@ -20,10 +20,11 @@
 | `managed-plugin-update.sh` | 独立适配安装的整包插件升级保护 |
 | `diagnostic-proxy.lua` | 私有 `/usr/share/openclash/mu5250-diagnostic-proxy.lua`；仅为解锁 `check` 子进程设置现有 mixed-port 代理，本地控制器请求绕过代理 |
 | `screen-network.c`, `screen-control.sh`, `screen-status-poll.sh`, `screen-network-watch.sh`, `screen-loader/` | B27 原厂屏幕“网络”页开关、真实状态和现有应用启动接入；[实现与验收](screen-network.md) |
+| `screen-start.sh`, `screen-early.init` | 幂等屏幕调度器与应用自有 S19 入口；核心和 LuCI 继续使用原 rc.local 时序 |
 
 常用管理入口：设备 LAN 地址的 `:8081/cgi-bin/luci/admin/services/openclash`。当前默认 LAN 为 `192.168.3.1`，原 OpenUI `:8080` 和密钥 SSH `:2222` 保留。路径、端口及接口默认值针对当前已验证安装；更换 LAN 或固件时应先复核。
 
-独立服务将上游 `root/etc/init.d/openclash` 作为 `/usr/share/openclash/mu5250-upstream-init.sh` 库使用，只保留订阅与配置生成逻辑。私有命名空间叠加 `/usr`、`/www`、`/etc/init.d`；应用文件落在 `/data/openclash`，原厂 DHCP、防火墙 UCI 与启动屏障服务保持由固件管理。启动入口只使用已有 `/etc/rc.local` 后台调用。
+独立服务将上游 `root/etc/init.d/openclash` 作为 `/usr/share/openclash/mu5250-upstream-init.sh` 库使用，只保留订阅与配置生成逻辑。私有命名空间叠加 `/usr`、`/www`、`/etc/init.d`；应用文件落在 `/data/openclash`，原厂 DHCP、防火墙 UCI 与启动屏障服务保持由固件管理。核心及 LuCI 继续使用已有 `/etc/rc.local` 后台调用；屏幕扩展的独立 S19 应用入口见 [屏幕启动说明](screen-network.md)。
 
 ## 核心时钟修复
 

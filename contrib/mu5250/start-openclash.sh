@@ -6,7 +6,9 @@ mkdir -p "$base/run"
 exec 9>"$base/run/namespace-start.lock"
 flock -x 9
 start_screen() {
-    if [ -x "$base/bin/screen-network-watch.sh" ] && [ -s "$base/lib/screen-network.manifest" ]; then
+    if [ -x "$base/bin/screen-start.sh" ]; then
+        (exec 9>&-; exec nohup /bin/sh "$base/bin/screen-start.sh") >>"$base/run/screen-start.log" 2>&1 </dev/null &
+    elif [ -x "$base/bin/screen-network-watch.sh" ] && [ -s "$base/lib/screen-network.manifest" ]; then
         (exec 9>&-; exec nohup /bin/sh "$base/bin/screen-network-watch.sh") >"$base/run/screen-network-watch.log" 2>&1 </dev/null &
     fi
 }

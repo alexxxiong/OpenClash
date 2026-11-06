@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - run: python3 contrib/mu5250/test-screen-start.py
       - run: |
           cc -std=c11 -O2 -Wall -Wextra -Werror -Wformat=2 contrib/mu5250/screen-ready.c -o /tmp/oc-screen-ready
           MU_OC_READY_TEST_BINARY=/tmp/oc-screen-ready python3 contrib/mu5250/test-screen-ready.py

@@ -14,6 +14,8 @@
 | `screen-status-poll.sh` | 独立进程轮询，原子发布状态缓存 |
 | `screen-network-watch.sh` | 原厂挂载空间中的启动接入；校验文件、等待 UI、每个 PID 只尝试一次 |
 | `screen-ready.c` | 只读检查显示缓冲、LVGL 定时器及界面主循环心跳；替代固定延迟 |
+| `screen-start.sh` | 早期与后期入口共用的幂等调度器，保留现有监控及日志 |
+| `screen-early.init` | 单独的 S19 屏幕扩展入口，后台等待；不创建 procd 实例 |
 | `screen-loader/` | ARM64 musl 加载工具、隔离进程夹具、便携构建及验证工具源码 |
 | `test-screen-control.py`, `test-screen-child.c` | 离线状态/串行控制回归和真实 Linux 子进程回收回归 |
 
@@ -36,10 +38,20 @@ GPR、FP/NEON、TLS、系统调用号和信号屏蔽字再分离。共享库与�
 
 ## 重启与关闭状态
 
-现有 `/etc/rc.local` 后台调用 `start-openclash.sh`，该入口启动独立 LuCI
-命名空间及屏幕 watcher。watcher 等原厂 UI 就绪后加载控件；没有打开
-“网络”页时，控件定时器会等待页面对象出现。
-启动 LuCI / 屏幕控件与启动代理核心相互独立。
+独立 LuCI 和核心仍由现有 `/etc/rc.local` 后台调用 `start-openclash.sh`。
+屏幕扩展另设应用自己的 `/etc/init.d/mu5250-screen` 和
+`/etc/rc.d/S19mu5250-screen -> ../init.d/mu5250-screen`。该入口排在原厂
+`S19zte_topsw_daemon` 之前，只后台调度屏幕 watcher，前台立即返回。
+它不创建 procd 实例、不加入 ZTE 守护进程同步屏障、不启动代理核心。
+
+早期入口与原有后期入口都调用 `screen-start.sh`；完整 argv/PID 检查和
+flock 防止重复启动，已有 watcher 的日志不再被后期调用截断。数据文件
+尚不可用时只有后台 worker 最多等待 60 秒，不阻塞固件启动队列；原有
+rc.local 屏幕调度仍保留作为后期回退。
+
+watcher 等原厂 UI 就绪后加载控件；没有打开“网络”页时，控件定时器会
+等待页面对象出现。屏幕入口提前不会提前独立 LuCI 或核心；早期后台尚未
+就绪时控件可能先显示“状态未知”并禁用操作，随后由原状态轮询自动更新。
 
 已移除原来的固定 30 秒延迟。未接入的 UI 每秒运行一次只读探测：确认
 原厂进程身份和固定版本指令、320×480 RGB565 DRM 显示映射、LVGL 定时器
@@ -61,7 +73,10 @@ GPR、FP/NEON、TLS、系统调用号和信号屏蔽字再分离。共享库与�
 - 用户自行重启后，已实测开启状态下核心及屏幕入口自动恢复。关闭状态
   重启只核对了落盘和启动 guard，尚未实测。
 - 就绪检测优化没有再次重启设备；新启动顺序经模拟回归、实机只读探测和
-  watcher 接管验证，完整冷启动提速尚未实测。
+  watcher 接管验证。随后用户重启证明 S95 调度本身偏晚：原厂 UI 进程
+  24.68 秒启动，监控 55.93 秒启动，而监控启动后约 1 秒即完成加载。
+- 新增独立 S19 屏幕入口解决启动阶段偏晚；部署时不重启整机，完整冷启动
+  显示时机仍待实测，不能把当前运行中接管时间当作冷启动时间。
 
 固件升级改变 UI 校验和时 watcher 会跳过接入；需要针对新 UI 再验证。
 
@@ -107,6 +122,7 @@ python3 contrib/mu5250/screen-loader/verify_build.py
 cc -std=c11 -O2 -Wall -Wextra -Werror contrib/mu5250/screen-ready.c -o /tmp/oc-screen-ready
 MU_OC_READY_TEST_BINARY=/tmp/oc-screen-ready python3 contrib/mu5250/test-screen-ready.py
 python3 contrib/mu5250/test-screen-watch.py
+python3 contrib/mu5250/test-screen-start.py
 ```
 
 子进程测试仅在 Linux 原生运行；Windows 只交叉编译 ARM64 版本，不能直接

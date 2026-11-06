@@ -1,0 +1,30 @@
+#!/bin/sh /etc/rc.common
+# Independent application entry: no procd instance and no ZTE barrier membership.
+START=19
+
+start() {
+    (
+        trap '' HUP
+        umask 077
+        base=/data/openclash
+        export PATH=/usr/bin:/usr/sbin:/bin:/sbin
+        exec 8>/tmp/mu5250-screen-bootstrap.lock
+        flock -n -x 8 || exit 0
+        # /data is normally mounted before S19. If it is late or unavailable,
+        # only this background worker waits; the firmware boot queue continues.
+        count=0
+        while [ "$count" -lt 60 ]; do
+            if [ -x "$base/bin/screen-start.sh" ] && [ -d "$base/run" ] && [ -s "$base/lib/screen-network.manifest" ]; then
+                exec 8>&-
+                /bin/sh "$base/bin/screen-start.sh" >>"$base/run/screen-start.log" 2>&1
+                exit 0
+            fi
+            count=$((count + 1))
+            sleep 1 8>&-
+        done
+    ) </dev/null >/dev/null 2>&1 &
+    return 0
+}
+
+# Disabling/removing the early entry does not stop the live widget or proxy.
+stop() { return 0; }
