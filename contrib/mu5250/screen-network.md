@@ -1,0 +1,95 @@
+# 原厂屏幕“网络”页 OpenClash 开关
+
+2026-11-07，在国行 MU5250 B27 的原厂“网络”页末尾加入原生开关。显示
+`OpenClash · 运行中 / 已关闭 / 启动中 / 停止中 / 启动失败 / 状态未知`。
+触摸只调用独立应用的 enable/start 或 disable/stop；状态同时核对核心、
+监听器、内部时钟与应用接管规则，不把 UCI 的启用位当作运行成功。
+
+## 当前实现
+
+| 文件 | 用途 |
+| --- | --- |
+| `screen-network.c` | 同 GUI 线程的定时器与原生 TUSettingSwitchButton；异步执行固定控制命令 |
+| `screen-control.sh` | 序列化 on/off；有界、只读的真实状态检查 |
+| `screen-status-poll.sh` | 独立进程轮询，原子发布状态缓存 |
+| `screen-network-watch.sh` | 原厂挂载空间中的启动接入；校验文件、等待 UI、每个 PID 只尝试一次 |
+| `screen-loader/` | ARM64 musl 加载工具、隔离进程夹具、便携构建及验证工具源码 |
+| `test-screen-control.py`, `test-screen-child.c` | 离线状态/串行控制回归和真实 Linux 子进程回收回归 |
+
+不改原厂 UI 可执行文件、虚表或磁盘固件，不重启原厂 UI。加载器只在
+被确认阻塞的主线程上暂时调用目标 libc 和显式入口；返回后逐项核对
+GPR、FP/NEON、TLS、系统调用号和信号屏蔽字再分离。共享库与少量 scratch
+内存保留到 UI 进程退出，移除入口只删除新增控件和定时器。
+
+这套 native 地址只适用于 UI SHA-256：
+
+```text
+571a201d18ba5ae80ce9f2b92948e63e9f73f2ead22b1920d3f58a6716f07028
+```
+
+`/data/openclash/lib/screen-network.manifest` 的单行格式是：
+`UI_SHA256 LOADER_SHA256 LIBRARY_SHA256 /data/openclash/lib/screen-network-HASH12.so`。
+它和二进制均为 root 所有，私有权限。源码构建不会自动安装、生成设备清单
+或把某个历史 SHA 指派给新二进制。必须先完成新工具的隔离进程验证。
+加载超时不保证能撤销目标 loader 锁或构造函数副作用，不对同一 PID 自动重试。
+
+## 重启与关闭状态
+
+现有 `/etc/rc.local` 后台调用 `start-openclash.sh`，该入口启动独立 LuCI
+命名空间及屏幕 watcher。watcher 等原厂 UI 进程出现并额外等待约 30 秒后
+加载控件；没有打开“网络”页时，控件定时器会等待页面对象出现。
+启动 LuCI / 屏幕控件与启动代理核心相互独立。
+
+关闭开关调用服务 `disable`（`uci set ...enable=0; uci commit openclash`），
+然后 `stop`。开启则保存 1，再启动。`private-init.sh` 仅在 enable=1 时
+调用 `start-enabled-core.sh`，后者每次重试前再次检查启用位。因此：
+
+- 开启后重启：LuCI、屏幕控件和 OpenClash 核心会按启动流程启动。
+- 关闭后重启：LuCI 和屏幕控件会启动，核心保持关闭；可以在屏幕重新开启。
+- 当前固件下已核对整个链及落盘设置；**本轮没有整机重启验收**。
+
+固件升级改变 UI 校验和时 watcher 会跳过接入；需要针对新 UI 再验证。
+
+## 实机验收
+
+用户在实际屏幕完成关闭、开启。首轮发现原厂 SIGCHLD 回收了控制子进程，
+按钮仍保留旧子 PID 而被禁用；已处理 `waitpid()` 的 `ECHILD`。
+第二轮开启成功，但旧缓存曾把开关短暂画回关闭；已让 pending 请求保持
+目标位置并显示过渡状态，直到新状态确认完成或失败。用户最终确认
+“关闭和开启正常，没有回退”。
+
+状态缓存采用 `/proc/uptime` 对应的 `CLOCK_BOOTTIME`，避免休眠后
+MONOTONIC 与缓存时间相差导致误报。未知/过期缓存禁用控制并显示未知。
+
+29 项 bridge 测试通过；设备原生 Linux 上 4 项子进程测试通过（正常、
+失败、外部回收、SIGCHLD 忽略）。隔离 dummy 的构造、入口、移除、完整
+寄存器恢复、canary、heartbeat 和协作退出通过。多次 UI 接入/移除保持
+原 UI PID、LuCI 命名空间及 Web PID，TracerPid 恢复 0。
+
+Wi-Fi 请求 Google 204、国内站点 200；美国 Fusion 08、Others→Proxy、
+Domestic→DIRECT 保留。原厂 UI、防火墙/DHCP UCI、rc.local、OpenClash
+配置、订阅文件、运行配置和接管脚本哈希与接入前相同。托管 provider 缓存
+在核心启动/刷新后有变化，不作为静态订阅或策略已改变的证据。此轮未重测 USB。
+
+## 回退
+
+本机部署保存的回退入口：
+`/data/openclash-backups/screen-network-94479ca23f04/rollback.sh`。
+它按完整 argv 停止两个自有辅助进程，调用版本校验的 `mu_screen_uninstall`，
+并恢复接入前的 `/data/openclash/bin/start-openclash.sh`。不停止代理核心、
+不修改用户的订阅或节点，也不重启原厂服务。脚本已语法检查；完整回退未
+实机执行，原生控件移除/恢复入口已反复验证。
+
+## 验证命令
+
+```sh
+python3 contrib/mu5250/test-screen-control.py
+clang -std=c11 -O2 -Wall -Wextra -Werror contrib/mu5250/test-screen-child.c -o /tmp/test-screen-child
+/tmp/test-screen-child
+python3 contrib/mu5250/screen-loader/build.py --zig /path/to/zig
+python3 contrib/mu5250/screen-loader/verify_build.py
+```
+
+子进程测试仅在 Linux 原生运行；Windows 只交叉编译 ARM64 版本，不能直接
+执行。`screen-loader/test_dummy.py` 仅用于已审阅的独立 AArch64 测试进程，
+不能作为原厂 UI 的自动验收脚本。

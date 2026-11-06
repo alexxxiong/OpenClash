@@ -19,6 +19,7 @@
 | `network-rules.sh` | 只拥有 `MU_OC_*` 链、路由表 7250、优先级 17250；覆盖 `br-lan` 的 Wi-Fi / USB 客户端 |
 | `managed-plugin-update.sh` | 独立适配安装的整包插件升级保护 |
 | `diagnostic-proxy.lua` | 私有 `/usr/share/openclash/mu5250-diagnostic-proxy.lua`；仅为解锁 `check` 子进程设置现有 mixed-port 代理，本地控制器请求绕过代理 |
+| `screen-network.c`, `screen-control.sh`, `screen-status-poll.sh`, `screen-network-watch.sh`, `screen-loader/` | B27 原厂屏幕“网络”页开关、真实状态和现有应用启动接入；[实现与验收](screen-network.md) |
 
 常用管理入口：设备 LAN 地址的 `:8081/cgi-bin/luci/admin/services/openclash`。当前默认 LAN 为 `192.168.3.1`，原 OpenUI `:8080` 和密钥 SSH `:2222` 保留。路径、端口及接口默认值针对当前已验证安装；更换 LAN 或固件时应先复核。
 

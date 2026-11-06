@@ -17,3 +17,5 @@ jobs:
       - run: python3 contrib/mu5250/boot-tests/test_ubus_readiness.py
       - run: python3 contrib/mu5250/clock-tests.py
       - run: python3 contrib/mu5250/network-tests/run_tests.py
+      - run: python3 contrib/mu5250/test-screen-control.py
+      - run: clang -std=c11 -O2 -Wall -Wextra -Werror contrib/mu5250/test-screen-child.c -o /tmp/test-screen-child && /tmp/test-screen-child
