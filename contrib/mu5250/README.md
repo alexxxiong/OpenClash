@@ -24,6 +24,8 @@
 
 常用管理入口：设备 LAN 地址的 `:8081/cgi-bin/luci/admin/services/openclash`。当前默认 LAN 为 `192.168.3.1`，原 OpenUI `:8080` 和密钥 SSH `:2222` 保留。路径、端口及接口默认值针对当前已验证安装；更换 LAN 或固件时应先复核。
 
+通过两端 Tailscale 子网路由连接家中 ASUS 的独立适配见 [home-access](home-access/README.md)。该模块保留当前代理分流，为已验证的内网域名提供精确 DNS 例外。
+
 独立服务将上游 `root/etc/init.d/openclash` 作为 `/usr/share/openclash/mu5250-upstream-init.sh` 库使用，只保留订阅与配置生成逻辑。私有命名空间叠加 `/usr`、`/www`、`/etc/init.d`；应用文件落在 `/data/openclash`，原厂 DHCP、防火墙 UCI 与启动屏障服务保持由固件管理。核心及 LuCI 继续使用已有 `/etc/rc.local` 后台调用；屏幕扩展的独立 S19 应用入口见 [屏幕启动说明](screen-network.md)。
 
 ## 核心时钟修复

@@ -49,6 +49,13 @@ dns['listen'] = "[::]:#{port('dns_port', 7874)}"
 dns['default-nameserver'] ||= ['223.5.5.5', '119.29.29.29']
 dns['nameserver'] ||= ['223.5.5.5', '119.29.29.29']
 dns['fake-ip-range'] = '198.19.0.1/16' if dns['enhanced-mode'] == 'fake-ip'
+
+# BEGIN MU5250 HOME DNS
+if File.file?('/data/tailscale-home/home-dns.rb')
+  require '/data/tailscale-home/home-dns'
+  Mu5250HomeDNS.apply(config)
+end
+# END MU5250 HOME DNS
 File.write(path + '.mu5250-new', YAML.dump(config))
 File.chmod(0o600, path + '.mu5250-new')
 File.rename(path + '.mu5250-new', path)
