@@ -48,4 +48,33 @@ MU_HOME_HOST_NS=$(readlink /proc/self/ns/net) unshare --net --fork bash /opt/mu5
 
 实机验收须强制走 MU 的 USB 或 Wi-Fi。电脑同时连家中 Wi-Fi 时，普通 curl 成功不能证明经过隧道。还应从家中主机反向访问 MU，核对源地址、回程和终端入站策略。2026-11-15 已通过 USB 访问学习站点及家中主机访问 MU 管理服务；未对整机进行重启验收。
 
-手机连接 MU Wi-Fi 也已能打开站点，但当前尚未建立 UDP 直连，DERP 中继使视频性能不达标。实测同一 512 KiB 分段在家中直连总耗时约 0.15 秒，经 MU 隧道约 26 秒，正文吞吐约 29 KiB/s；TCP MSS 已核对为 1240。HTTP 200/206 只证明资源可达，不能代表连续播放流畅。进一步改善需检查家中上级光猫的公网/端口映射条件，或另行配置合适的公网中继。
+公网中继前的基线：手机连接 MU Wi-Fi 能打开站点，但官方 DERP 路径上的视频性能不达标。同一 512 KiB 分段在家中直连约 0.15 秒，经 MU 隧道约 26 秒，正文吞吐约 29 KiB/s；TCP MSS 为 1240。HTTP 200/206 只证明资源可达，不能代表连续播放流畅。
+
+## 公网 Peer Relay
+
+双方都支持 Tailscale 1.86 以后的 Peer Relay 功能，可在有公网 UDP 入口的第三台服务器运行中继。此服务只转发经过认证的加密流量，不需要发布子网、接管 DNS 或选择互联网出口。现有网关节点与 OpenClash 分流保持。
+
+`peer-relay.service` 是独立服务器单元模板：官方已校验的静态客户端位于 `/opt/mu5250-relay/bin/`，状态位于 `/var/lib/mu5250-peer-relay/`，专用 socket 位于 `/run/mu5250-peer-relay/`，接口为 `ts-mu-relay`。不要覆盖服务器原来的 Tailscale 或 Web/TURN/远程桌面服务。
+
+安装服务后，先授权服务器加入同一 tailnet，再设置中继。`--relay-server-port` 属于 `set`，不应传给 `up`：
+
+```sh
+/opt/mu5250-relay/bin/tailscale --socket=/run/mu5250-peer-relay/tailscaled.sock up --hostname=mu5250-wuhan-relay --accept-dns=false --accept-routes=false --netfilter-mode=off
+/opt/mu5250-relay/bin/tailscale --socket=/run/mu5250-peer-relay/tailscaled.sock set --relay-server-port=40000 --relay-server-static-endpoints='<PUBLIC_IP>:40000'
+```
+
+云安全组需允许 UDP 40000 入站；此端口的中继分配由 Tailscale 身份及能力授权控制。加入下面的 grant，替换三个 Tailscale IPv4 地址，并保留现有策略。不要直接用示例覆盖整个策略文件：
+
+```json
+{
+  "src": ["<MU_TAILSCALE_IP>/32", "<ASUS_TAILSCALE_IP>/32"],
+  "dst": ["<RELAY_TAILSCALE_IP>/32"],
+  "app": {"tailscale.com/cap/relay": []}
+}
+```
+
+使用 `tailscale ping` 和 `status` 确认实际路径为 `peer-relay(<PUBLIC_IP>:40000:...)`。初始探测可能先经过 DERP，再切换到 Peer Relay。`direct connection not established` 表示没有端到端直连，不表示 Peer Relay 失败。
+
+2026-11-15 武汉中继验收：512 KiB 分段总耗时从 26.09 秒降到 2.45 秒，正文吞吐从 29.4 升到 261 KiB/s，Peer Relay 往返通常约 68–120 ms。手机反馈明显改善但偶尔仍缓冲；最高平均码率课程约需 194 KiB/s，浏览器实际测试仍有等待。此结果不能保证所有高码率课程完全流畅，尚需核对服务器公网带宽和链路抖动。
+
+`peer-relay-rollback.sh` 只停止并禁用本适配的服务器单元；完整撤回还需精确移除本次新增的能力授权与云安全组端口规则，保留其他规则。身份状态、完整 tailnet 策略和授权链接不应进入源码。

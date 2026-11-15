@@ -1,0 +1,21 @@
+[Unit]
+Description=MU5250 authenticated Tailscale peer relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/mu5250-relay/bin/tailscaled --state=/var/lib/mu5250-peer-relay/tailscaled.state --socket=/run/mu5250-peer-relay/tailscaled.sock --tun=ts-mu-relay --port=41642
+RuntimeDirectory=mu5250-peer-relay
+RuntimeDirectoryMode=0700
+StateDirectory=mu5250-peer-relay
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
