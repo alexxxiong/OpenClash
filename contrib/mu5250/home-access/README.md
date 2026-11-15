@@ -75,6 +75,28 @@ MU_HOME_HOST_NS=$(readlink /proc/self/ns/net) unshare --net --fork bash /opt/mu5
 
 使用 `tailscale ping` 和 `status` 确认实际路径为 `peer-relay(<PUBLIC_IP>:40000:...)`。初始探测可能先经过 DERP，再切换到 Peer Relay。`direct connection not established` 表示没有端到端直连，不表示 Peer Relay 失败。
 
-2026-11-15 武汉中继验收：512 KiB 分段总耗时从 26.09 秒降到 2.45 秒，正文吞吐从 29.4 升到 261 KiB/s，Peer Relay 往返通常约 68–120 ms。手机反馈明显改善但偶尔仍缓冲；最高平均码率课程约需 194 KiB/s，浏览器实际测试仍有等待。此结果不能保证所有高码率课程完全流畅，尚需核对服务器公网带宽和链路抖动。
+2026-11-15 武汉中继初次验收：512 KiB 分段总耗时从 26.09 秒降到 2.45 秒，正文吞吐从 29.4 升到 261 KiB/s，Peer Relay 往返通常约 68–120 ms。当时手机明显改善但偶尔仍缓冲；后续进一步定位和优化见下节。
 
 `peer-relay-rollback.sh` 只停止并禁用本适配的服务器单元；完整撤回还需精确移除本次新增的能力授权与云安全组端口规则，保留其他规则。身份状态、完整 tailnet 策略和授权链接不应进入源码。
+
+## 家中 Web 入口的 TCP 优化
+
+进一步测试中，公网服务器→家中可达到约 54 Mbps，公网服务器→MU 可达到约 77 Mbps；MU 经隧道下载学习视频却只有约 2–3 Mbps。MU CPU 和中继 UDP 接收缓冲有余量；按实际 UDP 数据报拆分 GRO 合包后，中继→MU 的样本未见丢包。家中 TLS 发送端的 CUBIC 则存在较多重传及窗口退缩。这个结果不支持直接把缓冲归因于购买带宽上限。
+
+`home_tcp_optimize.py` 为单节点 K3s 的本地 Traefik 网络命名空间添加一条到 `192.168.3.0/24` 的返回路由，下一跳和接口沿用原默认路由，仅设置 `congctl bbr`、私有协议标记 242。宿主机和命名空间的全局 TCP 默认值仍是 CUBIC；网关分流、代理节点、MTU、视频编码和服务进程保持。
+
+适用前提是 Python 3.9+、K3s、宿主机具备 BBR 模块，Traefik 的原始客户端地址得到保留。脚本拒绝宿主机网络命名空间，拒绝覆盖既有路由，用 namespace fd 防止 PID 重用，并记录自身路由；清理时只移除仍与自身记录一致的条目。
+
+部署时把脚本安装为 `/opt/mu5250-home-tcp/optimize.py`，服务模板为 `mu5250-home-tcp.service`；其状态目录是 `/var/lib/mu5250-home-tcp/`。服务每 15 秒检查本地 Traefik 容器，可在 Pod 更换后重新应用。不需要重启 K3s、Traefik、网关或 OpenClash。此实现针对当前单节点部署，改变子网或入口控制器时须复核。
+
+在家中 Linux 上先执行 `modprobe tcp_bbr`，再运行隔离测试：
+
+```sh
+python3 test_home_tcp_optimize.py ./home_tcp_optimize.py
+```
+
+测试自动创建临时网络命名空间，7 项内核检查覆盖宿主命名空间拒绝、外来路由保护、限定目的地、默认值保持、幂等、精确回退、用户修改保护及状态写入失败回退。生产服务启用后只读状态与下载验证通过，未执行生产服务启停或冷启动验收。
+
+实际 A/B/A 测试，同一 4 MiB 分段在 CUBIC 下约 11–17 秒，BBR 两次约 1.65 秒；保留限定网段配置后，16 MiB 持续下载约 5.59 秒，即约 24 Mbps。高码率示例平均约 1.6 Mbps，一秒峰值约 4.1 Mbps；原文件已 faststart，关键帧间隔约 10.4 秒。新连接具备更大余量，仍需以手机实际播放验收，已有长连接应关闭页面后重新打开。
+
+`home-tcp-rollback.sh` 停止并禁用自身优化服务，清理其仍保持原值的路由，不覆盖他人改动。既有 TCP 连接的算法在连接生命周期内保持；服务不强制断开连接。

@@ -1,0 +1,19 @@
+[Unit]
+Description=BBR for MU5250 clients in local Traefik network namespaces
+After=k3s.service
+Wants=k3s.service
+
+[Service]
+Type=simple
+ExecStartPre=/sbin/modprobe tcp_bbr
+ExecStart=/usr/bin/python3 /opt/mu5250-home-tcp/optimize.py
+ExecStopPost=/usr/bin/python3 /opt/mu5250-home-tcp/optimize.py --cleanup
+StateDirectory=mu5250-home-tcp
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
