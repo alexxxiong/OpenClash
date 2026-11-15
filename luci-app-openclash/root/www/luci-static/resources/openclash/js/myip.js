@@ -371,17 +371,8 @@
                     return Promise.all([resp.ok, resp.status, resp.json(), resp.headers]);
                 }
             }).then(([ok, status, data, headers]) => {
-                if (ok) {
-                    let json = {
-                        ok,
-                        status,
-                        data,
-                        headers
-                    }
-                    return json;
-                } else {
-                    throw new Error('HTTP ' + status);
-                }
+                if (!ok) throw new Error('HTTP ' + status);
+                return { ok, status, data, headers };
             }).finally(function() { clearTimeout(timer); });
         },
         parseIPIpip: (ip, elID) => {
@@ -413,9 +404,9 @@
                         else {
                             $$.getElementById(elID).innerHTML = 'Unknown';
                         }
-                    })
+                    }).catch(function() {})
                 }
-            })
+            }).catch(function() {})
         },
         getPcolIP: () => {
             document.querySelectorAll('script[data-pcol]').forEach(function(el) {
@@ -464,13 +455,16 @@
         getIpifyIP: () => {
             IP.get(`https://api.ipify.org/?format=json&z=${random}`, 'json')
             .then(resp => {
+                if (!resp || !resp.data) return;
                 $$.getElementById('ip-ipify').innerHTML = localStorage.getItem('privacy_my_ip') == 'true' ? '***.***.***.***' : resp.data.ip;
                 return resp.data.ip;
             })
             .then(ip => {
-                IP.parseIPIpip(ip, 'ip-ipify-geo');
-                addTitleOnOverflow();
-            })
+                if (ip) {
+                    IP.parseIPIpip(ip, 'ip-ipify-geo');
+                    addTitleOnOverflow();
+                }
+            }).catch(function() {})
         },
         getIpsbIP: () => {
             fetch(`https://api.ip.sb/geoip?z=${random}`)
@@ -479,7 +473,7 @@
                     $$.getElementById('ip-ipsb').innerHTML = localStorage.getItem('privacy_my_ip') == 'true' ? '***.***.***.***' : data.ip;
                     $$.getElementById('ip-ipsb-geo').innerHTML = `${data.country} ${data.isp}`;
                     addTitleOnOverflow();
-                })
+                }).catch(function() {})
         }
     };
 

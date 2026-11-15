@@ -18,9 +18,15 @@
 #define NETWORK_VTABLE ((uintptr_t)0xe64908)
 #define TIMER_CREATE ((uintptr_t)0x47a6dc)
 #define SWITCH_CTOR ((uintptr_t)0x54875c)
+#ifndef STATUS_FILE
 #define STATUS_FILE "/data/openclash/run/screen-status.json"
+#endif
+#ifndef CONTROL
 #define CONTROL "/data/openclash/bin/screen-control.sh"
+#endif
+#ifndef UI_LOG
 #define UI_LOG "/data/openclash/run/screen-ui.log"
+#endif
 
 struct cpp_string { uintptr_t words[4]; };
 typedef void (*timer_cb)(void *);
@@ -29,8 +35,9 @@ typedef void *(*new_fn)(size_t);
 typedef void (*string_ctor_fn)(struct cpp_string *, const char *);
 typedef void (*string_dtor_fn)(struct cpp_string *);
 typedef void (*switch_ctor_fn)(void *,void *,const struct cpp_string *);
-typedef void (*set_pos_fn)(void *,int,int);
-typedef int (*bottom_fn)(void *);
+typedef void (*set_size_fn)(void *,int,int);
+typedef void (*layout_fn)(void *);
+typedef int (*height_fn)(void *);
 typedef void (*set_bool_fn)(void *,int);
 typedef void (*set_callback_fn)(void *,void (*)(void *),void *);
 
@@ -42,9 +49,20 @@ static unsigned long sample_uptime, pending_after, error_until;
 static int pending_desired=-1;
 static char last_text[96];
 
+#ifdef MU_SCREEN_NATIVE_TEST
+/* Compile-time fixtures exercise the real tick with a fake native widget ABI.
+ * No test dispatch is included in the device library. */
+extern uintptr_t mu_screen_test_got(uintptr_t);
+extern uintptr_t mu_screen_test_native(uintptr_t);
+static uintptr_t got(uintptr_t a) { return mu_screen_test_got(a); }
+static uintptr_t native(uintptr_t a) { return mu_screen_test_native(a); }
+#else
 static uintptr_t got(uintptr_t a) { return *(const uintptr_t *)a; }
+static uintptr_t native(uintptr_t a) { return a; }
+#endif
 static void note(const char *text) {
-    FILE *f=fopen(UI_LOG,"a"); if(f){fprintf(f,"%s\n",text);fclose(f);}
+    FILE *f=fopen(UI_LOG,"a");
+    if(f){struct timespec t={0};clock_gettime(CLOCK_BOOTTIME,&t);fprintf(f,"[%ld.%03ld] %s\n",t.tv_sec,t.tv_nsec/1000000,text);fclose(f);}
 }
 static unsigned long uptime_sec(void) {
     /* /proc/uptime includes suspended time. MONOTONIC does not on this panel. */
@@ -66,7 +84,8 @@ static int compatible(void) {
     const uintptr_t *v=(const uintptr_t*)NETWORK_VTABLE;
     return v[0]==0x4f76ac&&v[1]==0x4f77d4&&v[11]==0x4f90e8&&v[19]==0x4f7f58
         &&*(const uint32_t*)TIMER_CREATE==0xa9bd7bfd
-        &&*(const uint32_t*)SWITCH_CTOR==0xa9bc7bfd;
+        &&*(const uint32_t*)SWITCH_CTOR==0xa9bc7bfd
+        &&got(0xe6fae8)==0x548e68&&*(const uint32_t*)0x548e68==0xa9b97bfd;
 }
 static void *find_network(void) {
     FILE *f=fopen("/proc/self/maps","r");char line[512],perm[8];unsigned long a,b,offset,inode;char dev[32];
@@ -96,7 +115,7 @@ done:fclose(f);return found;
 static void set_text(const char *text) {
     if(!strcmp(last_text,text))return;
     struct cpp_string s;
-    ((string_ctor_fn)0x4f7a50)(&s,text);
+    ((string_ctor_fn)native(0x4f7a50))(&s,text);
     uintptr_t *v=*(uintptr_t**)row;
     ((void(*)(void*,const struct cpp_string*))v[11])(row,&s);
     ((string_dtor_fn)got(0xe682b0))(&s);
@@ -147,22 +166,28 @@ static void tick(void *called_timer) {
     reap_child();
     if(!network){network=find_network();if(!network)return;}
     if(!mapped((uintptr_t)network,176)||*(uintptr_t*)network!=NETWORK_VTABLE){network=NULL;row=NULL;last_text[0]=0;last_enabled=-1;return;}
+    void *parent=*(void**)((char*)network+0x58);
+    if(!mapped((uintptr_t)parent,80)||*(uintptr_t*)parent!=0xe67388)return;
+    int added=0,initial_height=0;
     if(!row){
-        struct cpp_string empty;((string_ctor_fn)0x4f7a50)(&empty,"");
+        /* The stock page lays out once before our asynchronous child exists.
+         * Normalize that stock layout, then include the new child below. */
+        ((layout_fn)got(0xe6fae8))(parent);
+        initial_height=((height_fn)got(0xe68470))(parent);
+        struct cpp_string empty;((string_ctor_fn)native(0x4f7a50))(&empty,"");
         row=((new_fn)got(0xe69fb8))(0xa8);
         if(!row){((string_dtor_fn)got(0xe682b0))(&empty);return;}
-        ((switch_ctor_fn)SWITCH_CTOR)(row,*(void**)((char*)network+0x58),&empty);
+        ((switch_ctor_fn)native(SWITCH_CTOR))(row,parent,&empty);
         ((string_dtor_fn)got(0xe682b0))(&empty);
         ((set_callback_fn)got(0xe68898))(row,clicked,NULL);
+        /* Match the factory mobile-data switch's 284x52 content geometry. */
+        ((set_size_fn)got(0xe6cf18))(row,284,52);
+        uintptr_t *v=*(uintptr_t**)row;
+        ((set_bool_fn)v[6])(row,1);
         last_enabled=-1;
+        added=1;
         note("Added OpenClash switch to the stock Network page");
     }
-    int bottom=0;
-    for(unsigned offset=0x60;offset<=0xa0;offset+=8){
-        void *w=*(void**)((char*)network+offset);if(!w)continue;
-        int b=((bottom_fn)got(0xe69a88))(w);if(b>bottom&&b<4096)bottom=b;
-    }
-    ((set_pos_fn)got(0xe6feb8))(row,0,bottom+4);
     char state[24];usable=read_status(state,sizeof(state));
     const char *text="OpenClash · 状态未知";
     if(usable){
@@ -189,11 +214,19 @@ static void tick(void *called_timer) {
     if(last_enabled!=shown_desired){((set_bool_fn)got(0xe6c920))(row,shown_desired);last_enabled=shown_desired;}
     ((set_bool_fn)got(0xe6b280))(row,usable&&!busy&&child<=0);
     set_text(text);updating=0;
+    /* This is the same native container layout used on page entry. It grows
+     * the clipping rectangle and ignores hidden stock rows on the first view. */
+    ((layout_fn)got(0xe6fae8))(parent);
+    if(added){
+        char message[112];
+        snprintf(message,sizeof(message),"First layout: container %d -> %d; row 284x52",initial_height,((height_fn)got(0xe68470))(parent));
+        note(message);
+    }
 }
 __attribute__((visibility("default"))) int mu_screen_install(void) {
     if(installed)return 0;
     if(!compatible()){note("Unsupported stock UI build; extension left inactive");return 69;}
-    installed=1;timer=((timer_create_fn)TIMER_CREATE)(tick,1000,NULL);
+    installed=1;timer=((timer_create_fn)native(TIMER_CREATE))(tick,1000,NULL);
     if(!timer){installed=0;return 70;}
     note("Stock Network extension timer installed");return 0;
 }
@@ -201,6 +234,10 @@ __attribute__((visibility("default"))) int mu_screen_uninstall(void) {
     installed=0;
     if(timer){*(int32_t*)((char*)timer+0x18)=0;timer=NULL;}
     if(row){uintptr_t *v=*(uintptr_t**)row;((void(*)(void*))v[1])(row);row=NULL;}
+    if(network&&mapped((uintptr_t)network,176)&&*(uintptr_t*)network==NETWORK_VTABLE){
+        void *parent=*(void**)((char*)network+0x58);
+        if(mapped((uintptr_t)parent,80)&&*(uintptr_t*)parent==0xe67388)((layout_fn)got(0xe6fae8))(parent);
+    }
     network=NULL;last_text[0]=0;last_enabled=-1;
     note("Stock Network extension removed without restarting the UI");return 0;
 }

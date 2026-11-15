@@ -82,6 +82,8 @@ managed_stop() {
 procd_running() { core_running; }
 change_dnsmasq() { :; }
 revert_dnsmasq() { :; }
+apply_system_hosts() { :; }
+restore_system_hosts() { :; }
 add_cron() { :; }
 del_cron() { :; }
 service_started() { :; }
