@@ -1,6 +1,6 @@
 # MU5250 原厂系统独立 OpenClash 适配
 
-维护分支：`codex/mu5250-integration`。上游跟踪 `pickrui/OpenClash` 的 **dev**，不是默认 master。当前适配以 `8ceb9d1fb874edb51ab6296798f1aed771d78ee9`、OpenClash 0.48.012 为基础，实机为国行 MU5250 B27。
+维护分支：`codex/mu5250-integration`。上游跟踪 `pickrui/OpenClash` 的 **dev**，不是默认 master。2026-11-15 已合并 `b3c27459fb083e17c549dd7f89473aedd1e67189`、OpenClash 0.48.014；实机为国行 MU5250 B27。
 
 本目录保存已在原厂 OpenWrt 系统上运行的独立 LuCI/OpenClash 适配源码及离线测试。上游 LuCI 页面、订阅处理和 YAML 逻辑继续来自仓库主体；设备上的账号、密码、订阅、主机密钥、备份、日志和运行配置均不放入 Git。
 
@@ -17,7 +17,7 @@
 | `core-ready.sh`, `start-enabled-core.sh` | 监听器 / TUN 就绪检测、有限开机重试 |
 | `finalize-config.rb`, `core-clock-guard.sh` | 应用端口、TUN、内部 NTP 与同步后清 DNS 缓存保护 |
 | `network-rules.sh` | 只拥有 `MU_OC_*` 链、路由表 7250、优先级 17250；覆盖 `br-lan` 的 Wi-Fi / USB 客户端 |
-| `managed-plugin-update.sh` | 独立适配安装的整包插件升级保护 |
+| `managed-plugin-update.sh` | 独立适配安装的整包插件及核心升级保护，分别安装到两个上游更新脚本的私有 overlay 路径 |
 | `diagnostic-proxy.lua` | 私有 `/usr/share/openclash/mu5250-diagnostic-proxy.lua`；仅为解锁 `check` 子进程设置现有 mixed-port 代理，本地控制器请求绕过代理 |
 | `screen-network.c`, `screen-control.sh`, `screen-status-poll.sh`, `screen-network-watch.sh`, `screen-loader/` | B27 原厂屏幕“网络”页开关、真实状态和现有应用启动接入；[实现与验收](screen-network.md) |
 | `screen-start.sh`, `screen-early.init` | 幂等屏幕调度器与应用自有 S19 入口；核心和 LuCI 继续使用原 rc.local 时序 |
@@ -31,6 +31,8 @@
 配套分支：[alexxxiong/mihomo-oix — codex/mu5250-ntp-clock](https://github.com/alexxxiong/mihomo-oix/tree/codex/mu5250-ntp-clock)。
 
 原厂系统 epoch 与 UTC 有约 8 小时偏差。专用 DNS 签名及托管请求应使用核心 NTP 时钟；`finalize-config.rb` 保持 `write-to-system=false`，不修正固件系统时间。应用启动前等待本次 NTP 同步，再清除早期 DNS 答案、安装自己的接管规则；运行期间在同步事件后再次清缓存。
+
+2026-11-15 配套核心为官方 `alpha-oix-7426798` 的完整时钟修正版。新版增加签名域名本地验证，`oixdns.IsSignedName` 也须使用 NTP，与请求及域名签名合计三处；只复用旧版两处补丁会导致 Fusion 节点解析失败。补丁工具按固定发布校验和审查，不能直接网页更新核心。原厂系统 Hosts 由固件管理，此适配将上游新增的 Hosts 写入/恢复函数保持为空操作。
 
 核心修改与此保护需要一并保留。仅启用 NTP、仅刷 DNS、仅同步订阅均不能代替核心取时修正。原固定发布核心上的等价修改已实机验证动态解析、Wi-Fi IPv4 自动代理、国内直连和 UDP；IPv6 目标完整代理仍未验证成功。本轮没有对新增保护做完整整机重启验证。
 
