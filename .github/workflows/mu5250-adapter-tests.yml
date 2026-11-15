@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - run: clang -std=c11 -O2 -Wall -Wextra -Werror contrib/mu5250/test-screen-layout.c -o /tmp/test-screen-layout && /tmp/test-screen-layout
       - run: python3 contrib/mu5250/test-screen-start.py
       - run: |
           cc -std=c11 -O2 -Wall -Wextra -Werror -Wformat=2 contrib/mu5250/screen-ready.c -o /tmp/oc-screen-ready

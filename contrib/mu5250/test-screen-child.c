@@ -1,5 +1,8 @@
 /* Execute the payload's actual child lifecycle logic without invoking UI APIs. */
+#define UI_LOG "/dev/null"
 #include "screen-network.c"
+/* Keep fixture assertions and their signal/wait setup in optimized Zig builds. */
+#undef NDEBUG
 #include <assert.h>
 #include <signal.h>
 
